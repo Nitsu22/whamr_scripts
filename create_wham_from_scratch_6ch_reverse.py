@@ -13,6 +13,8 @@ FILELIST_STUB = os.path.join('data', 'mix_2_spk_filenames_{}.csv')
 SINGLE_DIR = 'mix_single'
 BOTH_DIR = 'mix_both'
 CLEAN_DIR = 'mix_clean'
+BOTH_REVERSE_DIR = 'mix_both_reverse'
+CLEAN_REVERSE_DIR = 'mix_clean_reverse'
 S1_DIR = 's1'
 S2_DIR = 's2'
 NOISE_DIR = 'noise'
@@ -53,6 +55,8 @@ def create_wham(wsj_root, wham_noise_path, output_root):
                     os.makedirs(os.path.join(output_path, CLEAN_DIR+sfx), exist_ok=True)
                     os.makedirs(os.path.join(output_path, SINGLE_DIR+sfx), exist_ok=True)
                     os.makedirs(os.path.join(output_path, BOTH_DIR+sfx), exist_ok=True)
+                    os.makedirs(os.path.join(output_path, CLEAN_REVERSE_DIR+sfx), exist_ok=True)
+                    os.makedirs(os.path.join(output_path, BOTH_REVERSE_DIR+sfx), exist_ok=True)
                     os.makedirs(os.path.join(output_path, S1_DIR+sfx), exist_ok=True)
                     os.makedirs(os.path.join(output_path, S2_DIR+sfx), exist_ok=True)
                 os.makedirs(os.path.join(output_path, NOISE_DIR), exist_ok=True)
@@ -71,13 +75,21 @@ def create_wham(wsj_root, wham_noise_path, output_root):
                 [utt_row['mic5_x'].iloc[0], utt_row['mic5_y'].iloc[0], mic_z],
                 [utt_row['mic6_x'].iloc[0], utt_row['mic6_y'].iloc[0], mic_z],
             ]
-            # Reverse speaker positions: s1 and s2 positions are swapped
+            # Create normal room: s1 at s1 position, s2 at s2 position
             room = WhamRoom([utt_row['room_x'].iloc[0], utt_row['room_y'].iloc[0], utt_row['room_z'].iloc[0]],
                             mics,
-                            [utt_row['s2_x'].iloc[0], utt_row['s2_y'].iloc[0], utt_row['s2_z'].iloc[0]],  # s2 position for source 0
-                            [utt_row['s1_x'].iloc[0], utt_row['s1_y'].iloc[0], utt_row['s1_z'].iloc[0]],  # s1 position for source 1
+                            [utt_row['s1_x'].iloc[0], utt_row['s1_y'].iloc[0], utt_row['s1_z'].iloc[0]],
+                            [utt_row['s2_x'].iloc[0], utt_row['s2_y'].iloc[0], utt_row['s2_z'].iloc[0]],
                             utt_row['T60'].iloc[0])
             room.generate_rirs()
+            
+            # Create reverse room: s2 position for source 0 (s1 audio), s1 position for source 1 (s2 audio)
+            room_reverse = WhamRoom([utt_row['room_x'].iloc[0], utt_row['room_y'].iloc[0], utt_row['room_z'].iloc[0]],
+                                    mics,
+                                    [utt_row['s2_x'].iloc[0], utt_row['s2_y'].iloc[0], utt_row['s2_z'].iloc[0]],
+                                    [utt_row['s1_x'].iloc[0], utt_row['s1_y'].iloc[0], utt_row['s1_z'].iloc[0]],
+                                    utt_row['T60'].iloc[0])
+            room_reverse.generate_rirs()
 
             # read the 16kHz unscaled speech files, but make sure to add all 'max' padding to end of utterances
             # for synthesizing all the reverb tails
@@ -92,13 +104,15 @@ def create_wham(wsj_root, wham_noise_path, output_root):
                                                                       noise_samples_temp, 'max',
                                                                       start_samp_16k=0)  # don't pad beginning yet
 
-            # Reverse audio: s1 audio goes to s2 position, s2 audio goes to s1 position
-            # Source 0 is s2 position, so we put s1 audio there
-            # Source 1 is s1 position, so we put s2 audio there
+            # Add audio to both rooms
             room.add_audio(s1_temp, s2_temp)
+            room_reverse.add_audio(s1_temp, s2_temp)
 
+            # Generate audio from both rooms
             anechoic = room.generate_audio(anechoic=True, fs=SAMPLE_RATES)
             reverberant = room.generate_audio(fs=SAMPLE_RATES)
+            anechoic_reverse = room_reverse.generate_audio(anechoic=True, fs=SAMPLE_RATES)
+            reverberant_reverse = room_reverse.generate_audio(fs=SAMPLE_RATES)
 
             for sr_i, sr_dir in enumerate(SAMPLE_RATES):
                 wav_dir = 'wav' + sr_dir
@@ -126,11 +140,15 @@ def create_wham(wsj_root, wham_noise_path, output_root):
                     s2 = quantize(s2) * scaling_npz[wham_speech_key][i_utt]
 
                     # Make relative source energy of anechoic sources same with original in mono (left channel) case
-                    # Note: positions are reversed
-                    # Source 0 (s2 position) has s1 audio, so s1 is at index 0
-                    # Source 1 (s1 position) has s2 audio, so s2 is at index 1
+                    # Note: positions are reversed in reverse room
+                    # Source 0 (s1 position) has s1 audio, so s1 is at index 0 in normal room
+                    # Source 1 (s2 position) has s2 audio, so s2 is at index 1 in normal room
                     s1_spatial_scaling = np.sqrt(np.sum(s1 ** 2) / np.sum(anechoic[sr_i][0, LEFT_CH_IND, :] ** 2))
                     s2_spatial_scaling = np.sqrt(np.sum(s2 ** 2) / np.sum(anechoic[sr_i][1, LEFT_CH_IND, :] ** 2))
+                    
+                    # For reverse room: Source 0 (s2 position) has s1 audio, Source 1 (s1 position) has s2 audio
+                    s1_spatial_scaling_reverse = np.sqrt(np.sum(s1 ** 2) / np.sum(anechoic_reverse[sr_i][0, LEFT_CH_IND, :] ** 2))
+                    s2_spatial_scaling_reverse = np.sqrt(np.sum(s2 ** 2) / np.sum(anechoic_reverse[sr_i][1, LEFT_CH_IND, :] ** 2))
 
                     noise_samples_full = read_scaled_wav(os.path.join(noise_path, output_name),
                                                          scaling_npz[wham_noise_key][i_utt],
@@ -140,30 +158,54 @@ def create_wham(wsj_root, wham_noise_path, output_root):
                     else:
                         out_len = np.minimum(len(s1), len(s2))
 
-                    # Note: positions are reversed
-                    # Source 0 (s2 position) has s1 audio, so s1 is at index 0
-                    # Source 1 (s1 position) has s2 audio, so s2 is at index 1
+                    # Process normal room audio
                     s1_anechoic, s2_anechoic = fix_length(anechoic[sr_i][0, ch_ind, :out_len].T * s1_spatial_scaling,
                                                           anechoic[sr_i][1, ch_ind, :out_len].T * s2_spatial_scaling,
                                                           datalen_dir)
                     s1_reverb, s2_reverb = fix_length(reverberant[sr_i][0, ch_ind, :out_len].T * s1_spatial_scaling,
                                                       reverberant[sr_i][1, ch_ind, :out_len].T * s2_spatial_scaling,
                                                       datalen_dir)
+                    
+                    # Process reverse room audio
+                    # Note: In reverse room, Source 0 (s2 position) has s1 audio, Source 1 (s1 position) has s2 audio
+                    s1_anechoic_reverse, s2_anechoic_reverse = fix_length(anechoic_reverse[sr_i][0, ch_ind, :out_len].T * s1_spatial_scaling_reverse,
+                                                                          anechoic_reverse[sr_i][1, ch_ind, :out_len].T * s2_spatial_scaling_reverse,
+                                                                          datalen_dir)
+                    s1_reverb_reverse, s2_reverb_reverse = fix_length(reverberant_reverse[sr_i][0, ch_ind, :out_len].T * s1_spatial_scaling_reverse,
+                                                                      reverberant_reverse[sr_i][1, ch_ind, :out_len].T * s2_spatial_scaling_reverse,
+                                                                      datalen_dir)
 
+                    # Process normal room sources
                     sources = [(s1_anechoic, s2_anechoic), (s1_reverb, s2_reverb)]
-                    for i_sfx, (sfx, source_pair) in enumerate(zip(SUFFIXES, sources)):
+                    sources_reverse = [(s1_anechoic_reverse, s2_anechoic_reverse), (s1_reverb_reverse, s2_reverb_reverse)]
+                    
+                    for i_sfx, (sfx, source_pair, source_pair_reverse) in enumerate(zip(SUFFIXES, sources, sources_reverse)):
+                        # Process normal room
                         s1_samples, s2_samples, noise_samples = append_or_truncate(source_pair[0], source_pair[1],
                                                                                    noise_samples_full, datalen_dir,
                                                                                    start_samp_16k[i_utt], downsample)
 
                         mix_clean, mix_single, mix_both = create_wham_mixes(s1_samples, s2_samples, noise_samples)
 
-                        # write audio
+                        # Write normal room audio
                         samps = [mix_clean, mix_single, mix_both, s1_samples, s2_samples]
                         dirs = [CLEAN_DIR, SINGLE_DIR, BOTH_DIR, S1_DIR, S2_DIR]
                         for dir, samp in zip(dirs, samps):
                             sf.write(os.path.join(output_path, dir+sfx, output_name), samp,
                                      sr, subtype='FLOAT')
+
+                        # Process reverse room
+                        s1_samples_reverse, s2_samples_reverse, _ = append_or_truncate(source_pair_reverse[0], source_pair_reverse[1],
+                                                                                       noise_samples_full, datalen_dir,
+                                                                                       start_samp_16k[i_utt], downsample)
+
+                        mix_clean_reverse, _, mix_both_reverse = create_wham_mixes(s1_samples_reverse, s2_samples_reverse, noise_samples)
+
+                        # Write reverse room audio (only mix_clean_reverse and mix_both_reverse)
+                        sf.write(os.path.join(output_path, CLEAN_REVERSE_DIR+sfx, output_name), mix_clean_reverse,
+                                 sr, subtype='FLOAT')
+                        sf.write(os.path.join(output_path, BOTH_REVERSE_DIR+sfx, output_name), mix_both_reverse,
+                                 sr, subtype='FLOAT')
 
                         if i_sfx == 0: # only write noise once as it doesn't change between anechoic and reverberant
                             sf.write(os.path.join(output_path, NOISE_DIR, output_name), noise_samples,
