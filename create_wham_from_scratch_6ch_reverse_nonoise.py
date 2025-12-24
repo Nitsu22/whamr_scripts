@@ -4,20 +4,20 @@ import soundfile as sf
 import pandas as pd
 from constants import SAMPLERATE
 import argparse
-from utils import read_scaled_wav, quantize, fix_length, create_wham_mixes, append_or_truncate
+from utils_nonoise import read_scaled_wav, quantize, fix_length, create_wham_mixes, append_or_truncate
 from wham_room import WhamRoom
 
 
 FILELIST_STUB = os.path.join('data', 'mix_2_spk_filenames_{}.csv')
 
-SINGLE_DIR = 'mix_single'
-BOTH_DIR = 'mix_both'
+# SINGLE_DIR = 'mix_single'  # Removed: contains noise
+# BOTH_DIR = 'mix_both'  # Removed: contains noise
 CLEAN_DIR = 'mix_clean'
-BOTH_REVERSE_DIR = 'mix_both_reverse'
+# BOTH_REVERSE_DIR = 'mix_both_reverse'  # Removed: contains noise
 CLEAN_REVERSE_DIR = 'mix_clean_reverse'
 S1_DIR = 's1'
 S2_DIR = 's2'
-NOISE_DIR = 'noise'
+# NOISE_DIR = 'noise'  # Removed: no noise
 SUFFIXES = ['_reverb']
 
 MONO = False  # Generate mono audio, change to false for stereo audio
@@ -25,25 +25,22 @@ SPLITS = ['tr', 'cv', 'tt']
 SAMPLE_RATES = ['8k'] # Remove element from this list to generate less data
 DATA_LEN = ['min'] # Remove element from this list to generate less data
 
-def create_wham(wsj_root, wham_noise_path, output_root):
+def create_wham(wsj_root, output_root):
     LEFT_CH_IND = 0
     if MONO:
         ch_ind = LEFT_CH_IND
     else:
         ch_ind = [0, 1, 2, 3, 4, 5]  # 6 channels
 
-    scaling_npz_stub = os.path.join(wham_noise_path, 'metadata', 'scaling_{}.npz')
+    # Note: scaling_npz is not needed for no-noise version, but we still need utterance_id and start_samp_16k
+    # For now, we'll use a dummy approach or read from a minimal metadata file
+    # If scaling_npz is still needed for utterance_id, we need to handle it differently
     reverb_param_stub = os.path.join('data', 'reverb_params_{}_6ch.csv')
 
     for splt in SPLITS:
 
         wsjmix_path = FILELIST_STUB.format(splt)
         wsjmix_df = pd.read_csv(wsjmix_path)
-
-        scaling_npz_path = scaling_npz_stub.format(splt)
-        scaling_npz = np.load(scaling_npz_path, allow_pickle=True)
-
-        noise_path = os.path.join(wham_noise_path, splt)
 
         reverb_param_path = reverb_param_stub.format(splt)
         reverb_param_df = pd.read_csv(reverb_param_path)
@@ -53,16 +50,19 @@ def create_wham(wsj_root, wham_noise_path, output_root):
                 output_path = os.path.join(output_root, wav_dir, datalen_dir, splt)
                 for sfx in SUFFIXES:
                     os.makedirs(os.path.join(output_path, CLEAN_DIR+sfx), exist_ok=True)
-                    os.makedirs(os.path.join(output_path, SINGLE_DIR+sfx), exist_ok=True)
-                    os.makedirs(os.path.join(output_path, BOTH_DIR+sfx), exist_ok=True)
+                    # os.makedirs(os.path.join(output_path, SINGLE_DIR+sfx), exist_ok=True)  # Removed: contains noise
+                    # os.makedirs(os.path.join(output_path, BOTH_DIR+sfx), exist_ok=True)  # Removed: contains noise
                     os.makedirs(os.path.join(output_path, CLEAN_REVERSE_DIR+sfx), exist_ok=True)
-                    os.makedirs(os.path.join(output_path, BOTH_REVERSE_DIR+sfx), exist_ok=True)
+                    # os.makedirs(os.path.join(output_path, BOTH_REVERSE_DIR+sfx), exist_ok=True)  # Removed: contains noise
                     os.makedirs(os.path.join(output_path, S1_DIR+sfx), exist_ok=True)
                     os.makedirs(os.path.join(output_path, S2_DIR+sfx), exist_ok=True)
-                os.makedirs(os.path.join(output_path, NOISE_DIR), exist_ok=True)
+                # os.makedirs(os.path.join(output_path, NOISE_DIR), exist_ok=True)  # Removed: no noise
 
-        utt_ids = scaling_npz['utterance_id']
-        start_samp_16k = scaling_npz['speech_start_sample_16k']
+        # Use utterance_id from wsjmix_df instead of scaling_npz
+        utt_ids = wsjmix_df['output_filename'].values
+        # For no-noise version, we don't need start_samp_16k from scaling_npz
+        # We'll use 0 as default or calculate from speech files
+        start_samp_16k = np.zeros(len(utt_ids), dtype=int)
 
         for i_utt, output_name in enumerate(utt_ids):
             utt_row = reverb_param_df[reverb_param_df['utterance_id'] == output_name]
@@ -99,10 +99,7 @@ def create_wham(wsj_root, wham_noise_path, output_root):
             s1_temp = quantize(read_scaled_wav(s1_path, 1))
             s2_temp = quantize(read_scaled_wav(s2_path, 1))
             s1_temp, s2_temp = fix_length(s1_temp, s2_temp, 'max')
-            noise_samples_temp = read_scaled_wav(os.path.join(noise_path, output_name), 1)
-            s1_temp, s2_temp, noise_samples_temp = append_or_truncate(s1_temp, s2_temp,
-                                                                      noise_samples_temp, 'max',
-                                                                      start_samp_16k=0)  # don't pad beginning yet
+            # No noise processing needed
 
             # Add audio to both rooms
             room.add_audio(s1_temp, s2_temp)
@@ -126,18 +123,16 @@ def create_wham(wsj_root, wham_noise_path, output_root):
                 for datalen_dir in DATA_LEN:
                     output_path = os.path.join(output_root, wav_dir, datalen_dir, splt)
 
-                    wsjmix_key = 'scaling_wsjmix_{}_{}'.format(sr_dir, datalen_dir)
-                    wham_speech_key = 'scaling_wham_speech_{}_{}'.format(sr_dir, datalen_dir)
-                    wham_noise_key = 'scaling_wham_noise_{}_{}'.format(sr_dir, datalen_dir)
-
+                    # For no-noise version, we use simple scaling (1.0) or can be adjusted
+                    # Original scaling factors are not needed without noise
                     utt_row = wsjmix_df[wsjmix_df['output_filename'] == output_name]
                     s1_path = os.path.join(wsj_root, utt_row['s1_path'].iloc[0])
                     s2_path = os.path.join(wsj_root, utt_row['s2_path'].iloc[0])
 
-                    s1 = read_scaled_wav(s1_path, scaling_npz[wsjmix_key][i_utt][0], downsample)
-                    s1 = quantize(s1) * scaling_npz[wham_speech_key][i_utt]
-                    s2 = read_scaled_wav(s2_path, scaling_npz[wsjmix_key][i_utt][1], downsample)
-                    s2 = quantize(s2) * scaling_npz[wham_speech_key][i_utt]
+                    s1 = read_scaled_wav(s1_path, 1.0, downsample)
+                    s1 = quantize(s1)
+                    s2 = read_scaled_wav(s2_path, 1.0, downsample)
+                    s2 = quantize(s2)
 
                     # Make relative source energy of anechoic sources same with original in mono (left channel) case
                     # Note: positions are reversed in reverse room
@@ -150,19 +145,9 @@ def create_wham(wsj_root, wham_noise_path, output_root):
                     s1_spatial_scaling_reverse = np.sqrt(np.sum(s1 ** 2) / np.sum(anechoic_reverse[sr_i][0, LEFT_CH_IND, :] ** 2))
                     s2_spatial_scaling_reverse = np.sqrt(np.sum(s2 ** 2) / np.sum(anechoic_reverse[sr_i][1, LEFT_CH_IND, :] ** 2))
 
-                    noise_samples_full = read_scaled_wav(os.path.join(noise_path, output_name),
-                                                         scaling_npz[wham_noise_key][i_utt],
-                                                         downsample_8K=downsample, mono=MONO)
-                    # ノイズファイルが2チャンネルの場合、6チャンネルに拡張
-                    if not MONO:
-                        if len(noise_samples_full.shape) == 1:
-                            # モノラルの場合は6チャンネルに拡張
-                            noise_samples_full = np.tile(noise_samples_full[:, np.newaxis], (1, 6))
-                        elif noise_samples_full.shape[1] == 2:
-                            # 2チャンネルの場合は6チャンネルに拡張 (ch0, ch1, ch0, ch1, ch0, ch1)
-                            noise_samples_full = np.tile(noise_samples_full, (1, 3))
+                    # No noise processing
                     if datalen_dir == 'max':
-                        out_len = len(noise_samples_full)
+                        out_len = np.maximum(len(s1), len(s2))
                     else:
                         out_len = np.minimum(len(s1), len(s2))
 
@@ -189,35 +174,29 @@ def create_wham(wsj_root, wham_noise_path, output_root):
                     
                     for i_sfx, (sfx, source_pair, source_pair_reverse) in enumerate(zip(SUFFIXES, sources, sources_reverse)):
                         # Process normal room
-                        s1_samples, s2_samples, noise_samples = append_or_truncate(source_pair[0], source_pair[1],
-                                                                                   noise_samples_full, datalen_dir,
-                                                                                   start_samp_16k[i_utt], downsample)
+                        s1_samples, s2_samples = append_or_truncate(source_pair[0], source_pair[1],
+                                                                   datalen_dir,
+                                                                   start_samp_16k[i_utt], downsample)
 
-                        mix_clean, mix_single, mix_both = create_wham_mixes(s1_samples, s2_samples, noise_samples)
+                        mix_clean = create_wham_mixes(s1_samples, s2_samples)
 
                         # Write normal room audio
-                        samps = [mix_clean, mix_single, mix_both, s1_samples, s2_samples]
-                        dirs = [CLEAN_DIR, SINGLE_DIR, BOTH_DIR, S1_DIR, S2_DIR]
+                        samps = [mix_clean, s1_samples, s2_samples]
+                        dirs = [CLEAN_DIR, S1_DIR, S2_DIR]
                         for dir, samp in zip(dirs, samps):
                             sf.write(os.path.join(output_path, dir+sfx, output_name), samp,
                                      sr, subtype='FLOAT')
 
                         # Process reverse room
-                        s1_samples_reverse, s2_samples_reverse, _ = append_or_truncate(source_pair_reverse[0], source_pair_reverse[1],
-                                                                                       noise_samples_full, datalen_dir,
-                                                                                       start_samp_16k[i_utt], downsample)
+                        s1_samples_reverse, s2_samples_reverse = append_or_truncate(source_pair_reverse[0], source_pair_reverse[1],
+                                                                                    datalen_dir,
+                                                                                    start_samp_16k[i_utt], downsample)
 
-                        mix_clean_reverse, _, mix_both_reverse = create_wham_mixes(s1_samples_reverse, s2_samples_reverse, noise_samples)
+                        mix_clean_reverse = create_wham_mixes(s1_samples_reverse, s2_samples_reverse)
 
-                        # Write reverse room audio (only mix_clean_reverse and mix_both_reverse)
+                        # Write reverse room audio (only mix_clean_reverse)
                         sf.write(os.path.join(output_path, CLEAN_REVERSE_DIR+sfx, output_name), mix_clean_reverse,
                                  sr, subtype='FLOAT')
-                        sf.write(os.path.join(output_path, BOTH_REVERSE_DIR+sfx, output_name), mix_both_reverse,
-                                 sr, subtype='FLOAT')
-
-                        if i_sfx == 0: # only write noise once as it doesn't change between anechoic and reverberant
-                            sf.write(os.path.join(output_path, NOISE_DIR, output_name), noise_samples,
-                                     sr, subtype='FLOAT')
 
             if (i_utt + 1) % 500 == 0:
                 print('Completed {} of {} utterances'.format(i_utt + 1, len(wsjmix_df)))
@@ -229,7 +208,6 @@ if __name__ == '__main__':
                         help='Output directory for writing wsj0-2mix 8 k Hz and 16 kHz datasets.')
     parser.add_argument('--wsj0-root', type=str, required=True,
                         help='Path to the folder containing wsj0/')
-    parser.add_argument('--wham-noise-root', type=str, required=True,
-                        help='Path to the downloaded and unzipped wham folder containing metadata/')
+    # --wham-noise-root removed: no noise needed
     args = parser.parse_args()
-    create_wham(args.wsj0_root, args.wham_noise_root, args.output_dir)
+    create_wham(args.wsj0_root, args.output_dir)
