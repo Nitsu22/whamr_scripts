@@ -16,4 +16,4 @@ python create_wham_from_scratch_reverse.py \
 python create_wham_from_scratch_6ch_reverse.py \
     --wsj0-root /net/midgar/work/nitsu/data/wsj/WSJ0Mix/ \
     --wham-noise-root /net/midgar/work/nitsu/data/wsj/wham_noise/ \
-    --output-dir /net/midgar/work/nitsu/data/wsj/MyWHAMR/WHAMR_rev_6
+    --output-dir /net/midgar/work/nitsu/data/wsj/MyWHAMR/WHAMR6ch

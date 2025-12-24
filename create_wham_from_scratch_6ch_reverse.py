@@ -18,12 +18,12 @@ CLEAN_REVERSE_DIR = 'mix_clean_reverse'
 S1_DIR = 's1'
 S2_DIR = 's2'
 NOISE_DIR = 'noise'
-SUFFIXES = ['_anechoic', '_reverb']
+SUFFIXES = ['_reverb']
 
-MONO = True  # Generate mono audio, change to false for stereo audio
+MONO = False  # Generate mono audio, change to false for stereo audio
 SPLITS = ['tr', 'cv', 'tt']
-SAMPLE_RATES = ['16k', '8k'] # Remove element from this list to generate less data
-DATA_LEN = ['max', 'min'] # Remove element from this list to generate less data
+SAMPLE_RATES = ['8k'] # Remove element from this list to generate less data
+DATA_LEN = ['min'] # Remove element from this list to generate less data
 
 def create_wham(wsj_root, wham_noise_path, output_root):
     LEFT_CH_IND = 0
