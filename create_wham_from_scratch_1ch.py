@@ -18,7 +18,7 @@ S2_DIR = 's2'
 NOISE_DIR = 'noise'
 SUFFIXES = ['_anechoic', '_reverb']
 
-MONO = False  # Generate mono audio, change to false for stereo audio
+MONO = True  # Generate mono audio, change to false for stereo audio
 SPLITS = ['tr', 'cv', 'tt']
 SAMPLE_RATES = ['16k', '8k'] # Remove element from this list to generate less data
 DATA_LEN = ['max', 'min'] # Remove element from this list to generate less data
