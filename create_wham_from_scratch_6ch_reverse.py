@@ -152,15 +152,15 @@ def create_wham(wsj_root, wham_noise_path, output_root):
 
                     noise_samples_full = read_scaled_wav(os.path.join(noise_path, output_name),
                                                          scaling_npz[wham_noise_key][i_utt],
-                                                         downsample_8K=downsample, mono=MONO)
-                    # ノイズファイルが2チャンネルの場合、6チャンネルに拡張
-                    if not MONO:
-                        if len(noise_samples_full.shape) == 1:
-                            # モノラルの場合は6チャンネルに拡張
-                            noise_samples_full = np.tile(noise_samples_full[:, np.newaxis], (1, 6))
-                        elif noise_samples_full.shape[1] == 2:
-                            # 2チャンネルの場合は6チャンネルに拡張 (ch0, ch1, ch0, ch1, ch0, ch1)
-                            noise_samples_full = np.tile(noise_samples_full, (1, 3))
+                                                         downsample_8K=downsample, mono=False)
+                    # ノイズファイルは2chなので、1ch目だけを抽出して6チャンネルに拡張
+                    if len(noise_samples_full.shape) == 1:
+                        # モノラルの場合は6チャンネルに拡張
+                        noise_samples_full = np.tile(noise_samples_full[:, np.newaxis], (1, 6))
+                    elif noise_samples_full.shape[1] == 2:
+                        # 2チャンネルの場合は1ch目（ch0）のみを抽出して6チャンネルに拡張
+                        noise_ch0 = noise_samples_full[:, 0]  # 1ch目のみ抽出
+                        noise_samples_full = np.tile(noise_ch0[:, np.newaxis], (1, 6))
                     if datalen_dir == 'max':
                         out_len = len(noise_samples_full)
                     else:
